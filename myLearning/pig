@@ -1,0 +1,51 @@
+A = LOAD '/ncdc_data.txt' USING PigStorage(':') AS (year:int, temp:int, quality:int);
+B = FILTER A BY temp != 9999 AND ((chararray)quality matches '[01459]');
+C = GROUP B BY year;
+D = FOREACH C GENERATE group, MAX(B.temp) AS max_temp;
+DUMP D;
+STORE D INTO 'max_temp' USING PigStorage(':');
+
+将用户数据的模式传给pig的最简单的方式是在加载数据时显式地告诉pig用户加载的数据是什么样子的。如果数据多于4个字段，会把多余的字段截掉不要。
+dividends = load 'NYSE_dividends' as (exchange:chararray,symbol:chararray,date:chararray,dividend:float);
+可以不给出数据的类型，这种情况下，数据类型被默认为bytearray。
+dividends = load 'NYSE_dividends' as (exchange,symbol,date,dividend);
+
+Pig Latin中的关键字是非大小写敏感的，例如LOAD和load是等价的。但是关系名称和字段名称是大小写敏感的。
+
+注释：
+1.A = load ‘foo’；--这个是单行注释
+
+2.	/*
+	*这个是多行注释
+	*/
+	
+	B = load /*这个是中间的注释*/ ‘bar’；
+	
+	
+加载：PigStorage TextLoader是两个内置的可以操作HDFS文件的pig加载函数
+dive = load 'NYSE_dividends' using PigStorage(',');//指定加载的数据的分隔符
+dividends = load '/dividends.csv' using PigStorage(',') as (exchange,symbol,date,dividend);
+
+存储：
+pig提供了store语句进行写数据
+store processed into '/data/example/processed';
+store processed into '/data/example/processed' using HBaseStorage();
+store processed into 'processed' using PigStorage(',');
+
+输出：
+dump语句可以将用户的脚本输出打印到屏幕上
+
+prices = load '/data/stocks/stocks.csv' using PigStorage(',') as (exchange:chararray, symbol:chararray, date:chararray, open:float, high:float, low:float, close:float, volume:float, adj_close:float);
+prices = load '/stocks07' using PigStorage(',') as (exchange:chararray, symbol:chararray, date:chararray, open:float, high:float, low:float, close:float, volume:float, adj_close:float);
+gain = foreach prices generate close - open;
+gain = foreach prices generate $6 - $3;
+
+可以使用*号代表所有字段
+可以使用..来指定字段区间
+
+foreach中的UDF
+
+每一个foreach语句的结果都是一个新的tuple
+
+
+

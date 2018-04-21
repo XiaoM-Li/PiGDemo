@@ -1,0 +1,50 @@
+Liming	23	001
+LiuPeng	34	002
+LuQi	33	003
+WangSan 33	004
+ZhangSan 22	005
+James	45	006
+Lucy	34	007
+
+
+A = load '/pigdata' as (name:chararray,age:int,id:chararray);
+B = foreach A generate name, id;
+dump B;
+
+
+[name#bob,age#21]
+[name#james,age#22]
+[name#kobe,age#23]//数据不要加引号
+
+A = load '/mapdata' as (info:map[]);
+B = foreach A generate info#'name';
+
+
+('bob',21)
+('james',22)
+
+A = load '/tupledata' as (t: tuple (name:chararray,age:int));
+B = foreach A generate t.name,t.$1;
+
+{('bob',55),('sally',52),('john',25)}
+A = load '/bagdata' as (b:bag{t:(name:chararray,age:int)});
+B = foreach A generate b.name;这里产生法的b.name是一个bag。
+B = foreach A generate b.(name,age);//当用户需要映射一个bag中的字段的时候，可以通过创建一个包含需要的字段的bag。
+
+
+A	1
+A	2
+A	3
+B	1
+B	2
+C	1
+C	1
+C	1
+A = load '/groupdata' as (name:chararray,value:int);
+B = group A by name;//B: {group: chararray,A: {(name: chararray,value: int)}} 按照name分组以后，为每一个组产生一个A的bag
+
+(A,{(A,3),(A,2),(A,1)})
+(B,{(B,2),(B,1)})
+(C,{(C,1),(C,1),(C,1)})
+
+C = foreach B generate group,SUM(A.value);

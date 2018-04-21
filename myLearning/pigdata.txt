@@ -1,0 +1,42 @@
+filter
+通过filter语句用户可以选择将哪些数据保留到用户的数据流里。filter中包含了一个断言。
+
+A = load '/dividends.csv' using PigStorage(',') as (exchange:chararray,symbol:chararray,date:chararray,dividend:float);
+B = filter  A by symbol matches 'AM.*';
+B = filter  A by not symbol matches 'AM.*';//加上not可以找到不满足正则表达式的记录
+
+
+B = filter A by value >= 2;
+
+Group：可以把具有相同键值的数据聚合到一起。
+pigLatin中group函数和聚合函数之间没有直接的关系。
+group将包含了特定的键所对应的所有记录封装到一个bag中。
+
+group by语句的输出结果包含两个字段，一个是键，另一个是包含了聚集的记录的bag。存放键的字段别名是group，而bag的别名和被分组的那条语句的别名相同。
+B = group A by (name,value);// group A all;
+B: {group: (name: chararray,value: int),A: {(name: chararray,value: int)}}
+
+Order by//对用户的数据进行排序，产生一个全排序的输出结果，整体都有序
+order daily by date,symbol;//desc asc
+
+distinct语句会将重复值去掉，只会对整个记录进行处理，而不是对字段级别进行计算。
+
+Join
+jnd = join daily by symbol,divs by symbol;
+
+jnd = join daily by (symbol,date),divs by (symbol,date);
+
+jnd = join A by id left outer,B by id;
+jnd = join A by id right outer,B by id;
+
+
+limit有时只想从结果中拿出几条数据看看的话，可以使用limit语句。
+B = limit A 100;
+
+Sample：
+提供了一种方式用于抽取数据样本，它会读取所有的数据然后返回一定百分比的行数的数据。
+some = sample A 0.1;
+
+Parallel：
+Pig的核心声明之一就是它将提供一种并行数据处理语言。为了告诉如何进行并行，Pig提供了parallel语句。parallel仅允许用户设置reduce阶段的并行执行。
+group daily by symbol parallel 10;//这样会使触发的MapReduce任务具有10个reducer。

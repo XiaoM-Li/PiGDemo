@@ -1,0 +1,158 @@
+Pig Latin高级应用
+
+foreach的高级功能
+------------------------------------------------
+flatten
+players = load '/bookdata/baseball' as (name:chararray,team:chararray,position:bag{t:(P:chararray)},bat:map[]);
+pos = foreach players generate name,flatten(position) as position;
+bypos = group pos by position;
+
+包含一个flatten的foreach会导致bag中的每条记录会和其他所有generate语句中的表达式进行交叉乘积。
+A,B,{(C),(D)} ---> A,B,C  A,B,D
+
+可以用一个三元表达式将空bag换成一个常量bag：
+foreach players generate name,((position is null or IsEmpty(position)) ? {('unknown')} : position) as position;
+
+对于tuple也同样可以使用flatten语句，它会使tuple中的每个字段转换成为顶层的字段，对于空tuple将会移除整条记录。
+
+-------------------------------------------------
+内嵌foreach
+可以在用户的数据流中对每条记录进行一系列的关系操作。
+foreach 后面跟着花括号表明将在foreach语句里内嵌一些操作符，在这段内嵌代码中，传递给foreach的记录每次处理一条。
+
+daily = load '/bookdata/NYSE_daily' as (exchange,symbol);
+grpd = group daily by exchange;
+//sym是一个包含了只有一个symbol字段的所有tuple的bag。
+uniqcnt = foreach grpd { sym = daily.symbol; uniq_sym = distinct  sym; generate group, COUNT(uniq_sym); };
+
+下面这个例子展示了查找每支股票对应支付的前三个股息值：
+divs = load '/bookdata/NYSE_dividends' as (exchange:chararray,symbol:chararray,date:chararray,dividend:float);
+grpd = group divs by symbol;
+top3 = foreach grpd { sorted = order divs by dividends desc; top = limit sorted 3; generate group, flatten(top);};
+
+
+---------------------------------------------------
+使用不同的join实现方法
+Pig中允许用户使用using语句进行指定所需要的实现。
+
+小数据和大数据进行join操作
+
+daily = load '/bookdata/NYSE_daily' as (exchange:chararray, symbol:chararray, date:chararray, open:float, high:float, low:float, close:float, volume:float, adj_close:float);
+dividends = load '/bookdata/NYSE_dividends' as (exchange:chararray,symbol:chararray,date:chararray,dividend:float);
+jnd = join daily by (exchange,symbol),dividends by(exchange,symbol) using 'replicated';
+using 'replicated'这句告诉pig使用分片复制算法执行这个join操作。将一个文件分片而对另一个文件进行复制。这个例子中的dividends会被加载到内存中。
+
+分片冗余join只支持inner和left outer join。它不可以做一个right outer join。
+
+
+对倾斜的数据进行join操作
+skew join
+例子：
+users = load 'users' as (name:chararray,city:chararray);
+cinfo = load 'cityinfo' as (city:chararray,population:int);
+jnd = join cinfo by city,users by city using 'skewed';
+假设users中用户所在城市的分布情况是这样的：有20个人住在巴塞罗那，有100000个人住在纽约，还有350人居住在波特兰。
+进一步假设pig认为对于每个reducer将75000条记录加载到内存是合理的。
+在这个数据进行连接操作时，纽约将会是被认为是需要划分到不同的reducer之间的键。在join阶段，除了纽约这个键之外的其他键都将作为默认的join连接操作进行处理。
+users中以纽约作为键的所有记录都将会被划分到两个reducer中去执行。cityinfo文件中以纽约为键的记录将会产生两份冗余分别传送到这些reducer中。
+skew join可以在inner join 或者是outer join中完成，它只能接受两个连接输入。
+
+对排好序的数据进行join操作--先排序再合并连接
+一个常见的数据库连接策略是首先对两边的输入按照join的键先进行排序操作，之后同时扫描两边的输入，进行join连接操作。
+
+jnd = join daily by symbol ,divs by symbol using 'merge';
+
+---------------------------------------------------------
+cogroup
+cogroup是group的一般化方式，不是基于一个键收集一个输入的记录，而是基于一个键收集多个输入的记录。结果是一条包含一个键和每个输入的一个数据包bag的记录。
+
+A = load 'input1' as (id:int,val1:int);
+B = load 'input2' as (id:int,val2:int);
+C = cogroup A by id,B by id;
+
+C: {group: int,A: {(id: int,val1: int)},B: {(id: int,val2: int)}};
+
+---------------------------------------------------------
+union
+需要将两个集合并到一起
+union不要求双方的输入数据具有相同的模式。
+
+union onschema需要所有的输入都要有模式，同时也要求所有的输入能够通过增加字段和隐式的类型转换产生一个共享的模式。
+
+C = union onschema A,B;
+
+---------------------------------------------------------
+cross，会将输入的每个记录一一结合，输入分别有n和m条，结果是n*m条记录。
+
+
+----------------------------------------------------------
+非线性数据流
+一个输入将会产生多余一个的输出
+
+对数据流的划分可以是隐式的也可以是显式的。隐式划分脚本中不需要指定特殊的操作符或者是语法，只需要简单的多次引用一个给定的关系就可以了。
+players    = load '/bookdata/baseball' as (name:chararray, team:chararray, 
+				position:bag{t:(p:chararray)}, bat:map[]);
+pwithba    = foreach players generate name, team, position,
+				bat#'batting_average' as batavg;
+byteam     = group pwithba by team;
+avgbyteam  = foreach byteam generate group, AVG(pwithba.batavg);
+store avgbyteam into '/pigout/by_team';
+flattenpos = foreach pwithba generate name, team,
+				flatten(position) as position, batavg;
+bypos      = group flattenpos by position;
+avgbypos   = foreach bypos generate group, AVG(flattenpos.batavg);
+store avgbypos into '/pigout/by_position';
+
+
+还可以使用split操作符显式地对数据流进行划分。
+
+daily = load '/bookdata/NYSE_daily' as (exchange:chararray, symbol:chararray, date:chararray);
+split daily into apr03 if date > '2009-09-01',apr02 if date <= '2009-09-01' and date > '2009-05-01',apr01 if date <='2009-05-01';
+store apr01 into '/splitres/01';
+store apr02 into '/splitres/02';
+store apr03 into '/splitres/03';
+这个也可以使用filter来进行过滤操作，产生三个结果集，输出到三个文件中。
+
+--------------------------------------------------------------
+执行过程控制
+pig提供了控制MapReduce任务如何执行的方式。
+set用于设置pig执行MapReduce任务的环境变量。
+set default_parallel 10；
+set job.name my_job;
+除了这些预定义的值外，set命令还可用于传递Java属性给pig和Hadoop。
+set io.sort.mb 2048；--设置为2GB
+
+----------------------------------------------------------------
+Pig Latin预处理器
+参数传入通过简单的字符串替换实现了这个功能。参数必须以字母或者是下划线开头。
+参数可以通过命令行或者是通过一个参数文件传入。
+yesterday = filter daily by date = '$DATE';
+pig -p DATE = 2009-12-17 daily.pig 或者是 pig -para_file daily.params daily.pig//参数文件中格式是 参数=值 的形式
+
+一个参数在被引用前必须要被定义。
+当时用参数传入功能时，在预处理器结束之后所有的参数必须都要被具体的值替换。
+
+--------------------------------------------------------------------
+宏
+宏是通过define语句定义的，一个宏会接受一组输入参数，即字符串类型的值，当宏被展开的时候会进行参数传入。
+宏不可以递归调用。
+define dividend_analysis (daily, year, daily_symbol, daily_open, daily_close)
+returns analyzed {
+	divs          = load '/bookdata/NYSE_dividends' as (exchange:chararray,
+						symbol:chararray, date:chararray, dividends:float);
+	divsthisyear  = filter divs by date matches '$year-.*';
+	dailythisyear = filter $daily by date matches '$year-.*';
+	jnd           = join divsthisyear by symbol, dailythisyear by $daily_symbol;
+	$analyzed     = foreach jnd generate dailythisyear::$daily_symbol,
+						$daily_close - $daily_open;
+};
+
+daily 	= load '/bookdata/NYSE_daily' as (exchange:chararray, symbol:chararray,
+			date:chararray, open:float, high:float, low:float, close:float,
+			volume:int, adj_close:float);
+results = dividend_analysis(daily, '2009', 'symbol', 'open', 'close');
+dump results;
+
+
+
+
